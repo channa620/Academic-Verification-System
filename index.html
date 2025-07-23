@@ -1,0 +1,253 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Certificate Blockchain</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen py-10 px-4">
+  <div class="bg-white p-8 rounded-xl shadow-xl w-full max-w-3xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">🔐 Student Certificate Blockchain</h1>
+
+    <div id="input-section">
+      <h2 class="text-xl font-semibold mb-4 text-gray-700">Enter Certificate Details</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input id="name" type="text" placeholder="Name" class="p-3 border rounded-md shadow-sm">
+        <input id="degree" type="text" placeholder="Degree" class="p-3 border rounded-md shadow-sm">
+        <input id="year" type="text" placeholder="Year" class="p-3 border rounded-md shadow-sm">
+        <input id="usn" type="text" placeholder="USN" class="p-3 border rounded-md shadow-sm">
+      </div>
+      <button onclick="addCertificate()" class="mt-6 w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition">➕ Add Certificate</button>
+
+      <div class="mt-4">
+        <label class="inline-flex items-center">
+          <input id="continue" type="checkbox" checked class="mr-2">
+          <span class="text-sm text-gray-600">Add another certificate</span>
+        </label>
+      </div>
+    </div>
+
+    <div id="output" class="mt-8">
+      <h2 class="text-xl font-semibold mb-2 text-gray-700">📜 Blockchain Ledger</h2>
+      <pre id="chain-output" class="bg-gray-50 p-4 rounded border text-sm overflow-auto max-h-96"></pre>
+
+      <div class="flex gap-4 mt-4">
+        <button onclick="printBlockchain()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">🖨️ Print Ledger</button>
+        <button onclick="downloadBlockchain()" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded">📥 Download Ledger</button>
+      </div>
+
+      <h2 class="text-xl font-semibold mt-6 mb-2 text-gray-700">🚫 Invalid Blocks</h2>
+      <pre id="invalid-output" class="bg-gray-50 p-4 rounded border text-sm overflow-auto max-h-60"></pre>
+
+      <h2 class="text-xl font-semibold mt-6 mb-2 text-gray-700">🔒 Blockchain Validity</h2>
+      <pre id="validity-output" class="bg-gray-50 p-4 rounded border text-sm"></pre>
+    </div>
+  </div>
+
+    <script>
+        function printBlockchain() {
+  const printWindow = window.open('', '', 'width=800,height=600');
+  const content = document.getElementById('chain-output').textContent;
+  printWindow.document.write('<pre>' + content + '</pre>');
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+  printWindow.close();
+}
+
+function downloadBlockchain() {
+  const content = document.getElementById('chain-output').textContent;
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "blockchain_ledger.txt";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+    </script>
+    <script>
+        let pyodide;
+        let blockchain;
+
+        async function loadPyodideAndPackages() {
+            pyodide = await loadPyodide();
+            await pyodide.loadPackage(['micropip']);
+            await pyodide.runPythonAsync(`
+                import micropip
+                await micropip.install('hashlib')
+            `);
+            await pyodide.runPythonAsync(`
+                import json
+                import time
+                import re
+                import js
+
+                class Block:
+                    def __init__(self, index, data, prev_hash):
+                        self.timestamp = time.time()
+                        self.index = index
+                        self.data = data
+                        self.prev_hash = prev_hash
+                        self.hash = self.calculate_hash()
+
+                    def calculate_hash(self):
+                        block_string = json.dumps({
+                            "timestamp": self.timestamp,
+                            "index": self.index,
+                            "data": self.data,
+                            "prev_hash": self.prev_hash
+                        }, sort_keys=True).encode()
+                        import hashlib
+                        return hashlib.sha256(block_string).hexdigest()
+
+                class Blockchain:
+                    def __init__(self):
+                        self.chain = [self.create_genesis_block()]
+                        self.invalid_blocks = []
+
+                    def create_genesis_block(self):
+                        return Block(0, "Genesis Block", "0")
+
+                    def add_block(self, data):
+                        if self.validate_data(data):
+                            prev_block = self.chain[-1]
+                            new_block = Block(len(self.chain), data, prev_block.hash)
+                            self.chain.append(new_block)
+                            return "✅ Block added successfully!"
+                        else:
+                            self.invalid_blocks.append(data)
+                            return "❌ Invalid block! USN format or other field is incorrect."
+
+                    def validate_data(self, data):
+                        required_fields = ['name', 'degree', 'year', 'usn']
+                        if not all(k in data for k in required_fields):
+                            return False
+                        if not data['name'].strip() or not data['degree'].strip():
+                            return False
+                        if not str(data['year']).isdigit() or not (1900 <= int(data['year']) <= 2100):
+                            return False
+                        usn_pattern = r'^1HK[0-9]{2}[A-Z]{2}[0-9]{3}$'
+                        if not re.match(usn_pattern, data['usn'].strip().upper()):
+                            return False
+                        return True
+
+                    def is_valid(self):
+                        for i in range(1, len(self.chain)):
+                            cur = self.chain[i]
+                            prev = self.chain[i-1]
+                            if cur.hash != cur.calculate_hash() or cur.prev_hash != prev.hash:
+                                return False
+                        return True
+
+                    def display_chain(self):
+                        output = "\\n📜 Valid Blockchain Ledger:\\n\\n"
+                        for block in self.chain:
+                            output += f"Index: {block.index}\\n"
+                            output += f"Timestamp: {time.ctime(block.timestamp)}\\n"
+                            output += f"Data: {json.dumps(block.data, indent=2)}\\n"
+                            output += f"Hash: {block.hash}\\n"
+                            output += f"Previous Hash: {block.prev_hash}\\n"
+                            output += "-" * 60 + "\\n"
+                        return output
+
+                    def display_invalid_blocks(self):
+                        if self.invalid_blocks:
+                            output = "\\n🚫 Invalid Blocks:\\n\\n"
+                            for i, data in enumerate(self.invalid_blocks, 1):
+                                output += f"[{i}] {json.dumps(data, indent=2)}\\n"
+                            return output
+                        else:
+                            return "\\n✅ No invalid blocks detected."
+
+                blockchain = Blockchain()
+            `);
+            blockchain = pyodide.globals.get('blockchain');
+        }
+
+        async function addCertificate() {
+            const name = document.getElementById('name').value;
+            const degree = document.getElementById('degree').value;
+            const year = document.getElementById('year').value;
+            const usn = document.getElementById('usn').value;
+            const certData = { name, degree, year, usn };
+
+            const result = await pyodide.runPythonAsync(`
+                result = blockchain.add_block(${JSON.stringify(certData)})
+                result
+            `);
+            alert(result);
+
+            // Update outputs
+            const chainOutput = await pyodide.runPythonAsync('blockchain.display_chain()');
+            const invalidOutput = await pyodide.runPythonAsync('blockchain.display_invalid_blocks()');
+            const isValid = await pyodide.runPythonAsync('blockchain.is_valid()');
+            document.getElementById('chain-output').textContent = chainOutput;
+            document.getElementById('invalid-output').textContent = invalidOutput;
+            document.getElementById('validity-output').textContent = isValid ? '✅ Valid' : '❌ Invalid';
+
+            // Clear form if not continuing
+            if (!document.getElementById('continue').checked) {
+                document.getElementById('name').value = '';
+                document.getElementById('degree').value = '';
+                document.getElementById('year').value = '';
+                document.getElementById('usn').value = '';
+            }
+        }
+
+        // Initialize Pyodide
+        loadPyodideAndPackages();
+    </script>
+    <script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script>
+</body>
+</html>
